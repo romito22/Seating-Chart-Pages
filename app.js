@@ -104,7 +104,9 @@ $('roster-body').addEventListener('input',e=>{const {id,feet,inches}=rosterField
 $('roster-body').addEventListener('focusout',e=>{if(e.target.tagName!=='INPUT')return;const {id,feet,inches}=rosterFields(e.target);if(id&&!e.target.closest('tr').contains(e.relatedTarget))queueHeight(id,feet,inches,0,true);});
 $('roster-body').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const {id,feet,inches}=rosterFields(e.target);if(id)autoHeight(id,feet,inches,true);}});
 function clearHeightDrafts(){for(const timer of heightTimers.values())clearTimeout(timer);heightTimers.clear();dirtyHeights.clear();}
-$('random-simulation').onclick=()=>{clearHeightDrafts();commit(simulate(state),'Simulated heights only — not real measurements.');};
+$('random-simulation').onclick=()=>$('simulation-confirm').showModal();
+$('cancel-simulation').onclick=()=>$('simulation-confirm').close();
+$('confirm-simulation').onclick=()=>{clearHeightDrafts();commit(simulate(state),'Simulated heights only — not real measurements.');$('simulation-confirm').close();};
 $('reset-all').onclick=()=>$('reset-confirm').showModal();
 $('cancel-reset').onclick=()=>$('reset-confirm').close();
 $('confirm-reset').onclick=()=>{clearHeightDrafts();selected=null;commit(resetAll(state,originalSeats),'Original seats restored; heights cleared.');$('reset-confirm').close();};
