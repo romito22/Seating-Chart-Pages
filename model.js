@@ -51,3 +51,9 @@ export function resetAll(state,seats){
  for(const p of next.people){p.height=null;delete p.heightSource;}
  return validate(next);
 }
+
+export function restoreNames(state,initial){
+ const next=structuredClone(state),names=new Map(initial.people.map(p=>[p.id,p.name]));
+ for(const p of next.people){if(/^Singer \d{3}$/.test(p.name)&&names.has(p.id))p.name=names.get(p.id);}
+ return next;
+}
