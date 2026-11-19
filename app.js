@@ -1,14 +1,23 @@
 import {exportPlan} from './share.js';
 import {move,setHeight,propose,validate,parseHeight,formatHeight,heightParts,simulate,resetAll,restoreNames} from './model.js?v=names-1';
+import {sharedConfigured,loadSharedState,saveSharedState,enableSharedEditing,onEditorStatus} from './shared-sync.js';
 const $=id=>document.getElementById(id),key='seating-chart-v2';
 let originalSeats;
 const dirtyHeights=new Set(),heightTimers=new Map();
-let state,selected=null,pending=null,history=[],storageOK=true,dragged=null;
+let state,selected=null,pending=null,history=[],storageOK=true,dragged=null,sharedRevision=0,sharedSaving=false,sharedQueued=null,sharedEditing=false,sharedLabel='Saved locally';
 const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const person=id=>state.people.find(p=>p.id===id),color=p=>state.sections.find(s=>s.name===p.section).color;
 function toast(text){$('toast').textContent=text;$('toast').classList.add('visible');clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').classList.remove('visible'),3500);}
 function save(){try{localStorage.setItem(key,JSON.stringify(state));storageOK=true;}catch{storageOK=false;toast('Could not save locally. Use Save a copy.');}}
-function commit(next,message){history.push(structuredClone(state));if(history.length>60)history.shift();state=next;save();render();if(message)toast(message);}
+function commit(next,message){history.push(structuredClone(state));if(history.length>60)history.shift();state=next;save();render();queueSharedSave(next);if(message)toast(message);}
+async function queueSharedSave(next){
+ if(!sharedEditing)return;
+ if(sharedSaving){sharedQueued=structuredClone(next);return;}
+ sharedSaving=true;sharedLabel='● Saving shared changes…';render();
+ try{const result=await saveSharedState(next,sharedRevision);if(result.conflict){sharedRevision=result.revision;state=validate(result.state);save();history=[];toast('Another editor changed the plan. Latest shared version loaded.');}else{sharedRevision=result.revision;sharedLabel='● Shared changes saved';}}
+ catch(error){sharedLabel='Shared save failed';toast(error.message);}
+ finally{sharedSaving=false;render();if(sharedQueued){const queued=sharedQueued;sharedQueued=null;queueSharedSave(queued);}}
+}
 function assign(id,target){try{commit(move(state,id,target),'Seating updated');}catch(e){toast(e.message);}}
 function figure(){return '<svg class="figure" viewBox="0 0 60 120" aria-hidden="true"><rect x="23" y="1" width="14" height="7" rx="2" fill="#e7bb63"/><rect x="14" y="7" width="32" height="29" rx="8" fill="#edc875"/><circle cx="24" cy="20" r="1.8" fill="#253b33"/><circle cx="36" cy="20" r="1.8" fill="#253b33"/><path d="M24 27q6 5 12 0" fill="none" stroke="#253b33" stroke-width="2"/><path d="M15 39h30l5 38H10z" fill="currentColor" stroke="#293d3430"/><path d="M13 42L4 72M47 42l9 30" stroke="currentColor" stroke-width="9"/><path d="M5 75v6m50-6v6" stroke="#edc875" stroke-width="7"/><path d="M14 80h14v35H14zm18 0h14v35H32z" fill="#315bba"/><path d="M12 115h17m2 0h17" stroke="#23458e" stroke-width="6"/></svg>';}
 function singer(p,front=false){return `<button class="${front?'front-person':'singer'} ${selected===p.id?'selected':''}" style="--voice:${color(p)};${front?`--height:${p.height===null?100:p.height*1.27}px`:''}" data-person="${escape(p.id)}" draggable="true" aria-pressed="${selected===p.id}" title="${escape(p.name)} · ${escape(p.section)} · Height: ${p.height===null?'':formatHeight(p.height)+(p.heightSource==='simulated'?' (simulated)':'')}">${front?figure()+`<span class="figure-tooltip"><strong>${escape(p.name)}</strong><span>Height: ${p.height===null?'':formatHeight(p.height)+(p.heightSource==='simulated'?' (simulated)':'')}</span></span>`:''}<span class="person-name">${escape(p.name)}</span><small>${front?(p.height===null?'Unknown height':formatHeight(p.height)):escape(p.section)}</small></button>`;}
@@ -16,7 +25,7 @@ function render(){
  
  const n=state.people.filter(p=>p.height!==null).length;$('measured').textContent=`${state.people.length} singers · ${n} heights${state.people.some(p=>p.heightSource==='simulated')?' · simulated':''}`;
  $('legend').innerHTML=state.sections.map(s=>`<span><i style="background:${s.color}"></i>${escape(s.name)}</span>`).join('');
- $('save-status').textContent=storageOK?'● Saved locally':'Not saved · download a copy';$('undo').disabled=!history.length;
+ $('save-status').textContent=sharedConfigured()?sharedLabel:(storageOK?'● Saved locally':'Not saved · download a copy');$('undo').disabled=!history.length;
  $('plan').innerHTML=['G','F','E','D','C','B','A'].map(row=>`<div class="plan-row ${/[AG]/.test(row)?'restricted':''}"><span class="row-label">${row}</span>${Array.from({length:31},(_,col)=>{const s=state.seats.find(s=>s.row===row&&s.col===col),p=s&&person(s.personId);return s?`<div class="seat ${!p?'empty':''}" data-seat="${escape(s.id)}">${p?singer(p):`<button class="empty-seat" data-target="${escape(s.id)}" aria-label="Empty seat ${escape(s.id)}">+<small>${s.id}</small></button>`}<span class="seat-number">${s.number}</span></div>`:`<div class="unconfirmed" title="${row==='G'?'Back row unavailable':'Availability unconfirmed'}">${31-col}</div>`;}).join('')}<span class="row-label">${row}</span></div>`).join('');
  const p=person(selected);$('selected-name').textContent=p?.name??'Select a singer';$('selected-info').textContent=p?`${p.section} · ${state.seats.find(s=>s.personId===p.id)?.id??'Unassigned'} · ${p.height===null?'Unknown height':formatHeight(p.height)+(p.heightSource==='simulated'?' (simulated)':'')}`:'';
  $('height-feet').disabled=!p;$('height-inches').disabled=!p;const parts=heightParts(p?.height??null);if(!$('height-form').contains(document.activeElement)){$('height-feet').value=parts[0];$('height-inches').value=parts[1];}$('unassign').disabled=!p||!state.seats.some(s=>s.personId===p.id);$('put-here').disabled=!p;
@@ -65,7 +74,7 @@ document.addEventListener('dragleave',e=>e.target.closest('.drop-over')?.classLi
 document.addEventListener('drop',e=>{const dest=e.target.closest('[data-seat],#unassigned-drop');if(dest&&dragged){e.preventDefault();assign(dragged,dest.dataset.seat??null);dragged=null;}});
 $('height-form').onsubmit=e=>{e.preventDefault();if(selected)autoHeight(selected,$('height-feet'),$('height-inches'),true);};
 $('unassign').onclick=$('put-here').onclick=()=>{if(selected)assign(selected,null);};
-$('undo').onclick=()=>{clearHeightDrafts();if(history.length){state=history.pop();save();render();toast('Change undone');}};
+$('undo').onclick=()=>{clearHeightDrafts();if(history.length){state=history.pop();save();render();queueSharedSave(state);toast('Change undone');}};
 $('front-row').onchange=renderFront;
 $('export').onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(state,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='seating-chart-backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Copy saved with names and heights.');};
 $('import').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>2000000)throw Error('The copy is too large.');const next=validate(JSON.parse(await file.text()));selected=null;originalSeats=structuredClone(next.seats);localStorage.setItem(key+'-original-seats',JSON.stringify(originalSeats));commit(next,'Copy opened');}catch(err){toast(err.message);}e.target.value='';};
@@ -112,4 +121,12 @@ $('cancel-reset').onclick=()=>$('reset-confirm').close();
 $('confirm-reset').onclick=()=>{clearHeightDrafts();selected=null;commit(resetAll(state,originalSeats),'Original seats restored; heights cleared.');$('reset-confirm').close();};
 $('share-plan').onclick=async()=>{try{await exportPlan(state);toast('Seating plan PNG downloaded.');}catch{toast('Could not export the seating plan. Please try again.');}};
 
-try{const local=['localhost','127.0.0.1'].includes(location.hostname)?await fetch('./local-data.json'):null;const initial=validate(await(local?.ok?local:await fetch('./demo-data.json?v=names-2',{cache:'no-store'})).json());originalSeats=structuredClone(initial.seats);try{const stored=JSON.parse(localStorage.getItem(key+'-original-seats'));if(stored){validate({...initial,seats:stored});originalSeats=stored;}}catch{}let saved;try{saved=localStorage.getItem(key);}catch{storageOK=false;}if(saved){try{state=validate(JSON.parse(saved));}catch{toast('The saved browser copy is invalid; loading the initial seating.');}}if(!state)state=initial;else state=restoreNames(state,initial);save();render();}catch(e){toast('Could not load seating. Reload or open a valid copy.');}
+$('enable-shared').hidden=!sharedConfigured();
+$('enable-shared').onclick=()=>{try{enableSharedEditing();}catch(error){toast(error.message);}};
+onEditorStatus(async status=>{
+ if(!status.ready){sharedEditing=false;sharedLabel='Shared view · editing not authorized';render();return;}
+ try{const remote=await loadSharedState();state=validate(remote.state);sharedRevision=remote.revision;sharedEditing=true;sharedLabel=`● Shared editing · ${status.email}`;history=[];save();render();toast('Shared editing enabled.');}
+ catch(error){toast(error.message);}
+});
+
+try{const local=['localhost','127.0.0.1'].includes(location.hostname)?await fetch('./local-data.json'):null;const initial=validate(await(local?.ok?local:await fetch('./demo-data.json?v=names-2',{cache:'no-store'})).json());originalSeats=structuredClone(initial.seats);let remote=null;if(sharedConfigured())try{remote=await loadSharedState();}catch{}if(remote){state=validate(remote.state);sharedRevision=remote.revision;sharedLabel='● Shared view · connect to edit';}else{try{const stored=JSON.parse(localStorage.getItem(key+'-original-seats'));if(stored){validate({...initial,seats:stored});originalSeats=stored;}}catch{}let saved;try{saved=localStorage.getItem(key);}catch{storageOK=false;}if(saved){try{state=validate(JSON.parse(saved));}catch{toast('The saved browser copy is invalid; loading the initial seating.');}}if(!state)state=initial;else state=restoreNames(state,initial);}save();render();if(sharedConfigured())setInterval(async()=>{if(sharedSaving||sharedEditing)return;try{const latest=await loadSharedState();if(latest.revision>sharedRevision){state=validate(latest.state);sharedRevision=latest.revision;save();render();}}catch{}},5000);}catch(e){toast('Could not load seating. Reload or open a valid copy.');}
