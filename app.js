@@ -1,6 +1,6 @@
 import {exportPlan} from './share.js';
 import {move,setHeight,propose,validate,parseHeight,formatHeight,heightParts,simulate,resetAll,restoreNames} from './model.js?v=names-1';
-import {sharedConfigured,loadSharedState,saveSharedState,enableSharedEditing,onEditorStatus} from './shared-sync.js';
+import {sharedConfigured,loadSharedState,saveSharedState,enableSharedEditing,onEditorStatus} from './shared-sync.js?v=fetch-1';
 const $=id=>document.getElementById(id),key='seating-chart-v2';
 let originalSeats;
 const dirtyHeights=new Set(),heightTimers=new Map();

@@ -17,7 +17,10 @@ window.addEventListener('message',event=>{
 
 export function loadSharedState(){
  if(!enabled)return Promise.resolve(null);
- return new Promise((resolve,reject)=>{const callback=`__seatingState${Date.now()}_${sequence++}`,script=document.createElement('script');const cleanup=()=>{delete window[callback];script.remove();clearTimeout(timer);};const timer=setTimeout(()=>{cleanup();reject(Error('Shared seating did not respond.'));},10000);window[callback]=payload=>{cleanup();resolve(payload);};script.onerror=()=>{cleanup();reject(Error('Could not load shared seating.'));};script.src=`${READ_URL}?mode=state&callback=${encodeURIComponent(callback)}&_=${Date.now()}`;document.head.append(script);});
+ const callback=`seatingState${Date.now()}_${sequence++}`;
+ return fetch(`${READ_URL}?mode=state&callback=${encodeURIComponent(callback)}&_=${Date.now()}`,{cache:'no-store'})
+  .then(response=>{if(!response.ok)throw Error('Shared seating did not respond.');return response.text();})
+  .then(text=>{const prefix=`${callback}(`,suffix=');';if(!text.startsWith(prefix)||!text.endsWith(suffix))throw Error('Shared seating returned invalid data.');return JSON.parse(text.slice(prefix.length,-suffix.length));});
 }
 
 export function saveSharedState(state,revision){
